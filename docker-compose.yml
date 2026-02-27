@@ -1,7 +1,6 @@
 services:
   qwen3-tts:
-    build: .
-    image: qwen3-tts:latest
+    image: ghcr.io/3n8/qwen3-tts:latest
     container_name: qwen3-tts
     restart: unless-stopped
     user: "${PUID}:${PGID}"

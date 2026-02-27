@@ -29,13 +29,18 @@ Replace `1050:1050` with your actual PUID:PGID.
 
 ## Running
 
-Create a `docker-compose.yml` file:
+Pull and run the container:
+
+```bash
+docker compose up -d
+```
+
+Or create a `docker-compose.yml`:
 
 ```yaml
 services:
   qwen3-tts:
-    build: .
-    image: qwen3-tts:latest
+    image: ghcr.io/3n8/qwen3-tts:latest
     container_name: qwen3-tts
     restart: unless-stopped
     user: "${PUID}:${PGID}"
