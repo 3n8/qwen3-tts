@@ -1,0 +1,30 @@
+services:
+  qwen3-tts:
+    build: .
+    image: qwen3-tts:latest
+    container_name: qwen3-tts
+    restart: unless-stopped
+    user: "${PUID}:${PGID}"
+    environment:
+      - TZ=Europe/Oslo
+      - PORT=3004
+      - TTS_API_KEY=sk-your-api-key-here
+    volumes:
+      - /opt/appdata/qwen3-tts/config:/config
+      - /opt/appdata/qwen3-tts/models:/models
+      - /opt/appdata/qwen3-tts/voices:/voices
+      - /opt/appdata/qwen3-tts/out:/out
+      - /opt/appdata/qwen3-tts/hf_cache:/root/.cache/huggingface
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    ipc: host
+    group_add:
+      - video
+      - render
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
