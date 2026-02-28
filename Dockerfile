@@ -21,7 +21,8 @@ ENV HOME=/home/nobody \
     VOICES_DIR=/voices \
     MODELS_DIR=/models \
     OUT_DIR=/out \
-    HF_CACHE_DIR=/root/.cache/huggingface
+    HF_HOME=/cache/huggingface \
+    HF_CACHE_DIR=/cache/huggingface
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
@@ -50,8 +51,8 @@ COPY build/common/root/utils.sh /usr/local/bin/system/scripts/docker/utils.sh
 RUN chmod +x /tmp/install.sh && /tmp/install.sh; rm -f /tmp/install.sh; \
     chmod +x /usr/bin/init.sh && \
     chmod +x /usr/local/bin/system/scripts/docker/utils.sh && \
-    mkdir -p /config /config/run /models /voices /out /root/.cache/huggingface && \
-    chmod -R 777 /config /models /voices /out /root/.cache
+    mkdir -p /config /config/run /models /voices /out /cache/huggingface && \
+    chmod -R 777 /config /models /voices /out /cache
 
 RUN echo "export TARGETARCH=${TARGETARCH}" >> /etc/image-build-info
 
