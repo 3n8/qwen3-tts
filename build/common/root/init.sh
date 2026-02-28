@@ -13,11 +13,12 @@ source '/usr/local/bin/system/scripts/docker/utils.sh'
 
 cat << "EOF"
 
-    _ __      __             
-   / |_/__   / /  ___   _____
-  | |/|\ \ / /  / -_) / __/ |
-  |___/ \_\_/_/  \__/ /_/   /_/
-  https://github.com/3n8/qwen3-tts
+    _____            ___  
+   |___ /   _ __    ( _ ) 
+     |_ \  | '_ \   / _ \ 
+    ___) | | | | | | (_) |
+   |____/  |_| |_|  \___/
+   https://github.com/3n8/qwen3-tts
 
 EOF
 

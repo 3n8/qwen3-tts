@@ -20,7 +20,6 @@ services:
     ipc: host
     group_add:
       - video
-      - render
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3004/healthz"]
       interval: 30s
