@@ -18,19 +18,17 @@ async def verify_api_key(
 
     if not expected_key:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=500,
             detail="TTS_API_KEY not configured on server",
         )
 
     if not api_key:
         raise HTTPException(
-            status_code=status.HTTP_UNAUTHORIZED,
+            status_code=401,
             detail="API key required. Pass via x-tts-api-key, xi-api-key, x-api-key, or Authorization header",
         )
 
     if api_key != expected_key:
-        raise HTTPException(
-            status_code=status.HTTP_UNAUTHORIZED, detail="Invalid API key"
-        )
+        raise HTTPException(status_code=401, detail="Invalid API key")
 
     return api_key
