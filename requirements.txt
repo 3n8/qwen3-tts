@@ -13,5 +13,4 @@ aiofiles==24.1.0
 python-dotenv==1.0.1
 webrtcvad==2.0.10
 tqdm==4.67.1
-huggingface-hub==0.28.1
 qwen-tts
