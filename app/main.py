@@ -6,8 +6,9 @@ import tempfile
 import zipfile
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+from pydantic import BaseModel
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Depends, Query
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Depends
 from fastapi.responses import Response, StreamingResponse, JSONResponse
 import soundfile as sf
 
@@ -26,6 +27,26 @@ app = FastAPI(
 
 MAX_CONCURRENCY = int(os.getenv("MAX_CONCURRENCY", "1"))
 semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+
+
+class TTSRequest(BaseModel):
+    text: str
+    model_id: Optional[str] = None
+    voice_settings: Optional[Dict[str, Any]] = None
+    output_format: str = "mp3_44100_128"
+
+
+class DesignVoiceRequest(BaseModel):
+    name: str
+    prompt: str
+    sample_text: Optional[str] = None
+    labels: Optional[Dict[str, str]] = None
+
+
+class BatchTTSRequest(BaseModel):
+    texts: List[str]
+    output_format: str = "mp3_44100_128"
+    voice_settings: Optional[Dict[str, Any]] = None
 
 
 @app.get("/healthz")
@@ -48,25 +69,21 @@ async def get_voice(voice_id: str, _: str = Depends(verify_api_key)):
 @app.post("/v1/text-to-speech/{voice_id}")
 async def text_to_speech(
     voice_id: str,
-    text: str = Query(..., min_length=1),
-    model_id: Optional[str] = Query(None),
-    voice_settings: Optional[Dict[str, Any]] = Query(None),
-    output_format: str = Query("mp3_44100_128"),
+    request: TTSRequest,
     _: str = Depends(verify_api_key),
 ):
-    if voice_settings is None:
-        voice_settings = {}
+    voice_settings = request.voice_settings or {}
 
     async with semaphore:
         audio_path, job_metadata = await qwen_engine.synthesize(
-            text=text,
+            text=request.text,
             voice_id=voice_id,
             voice_store=voice_store,
             voice_settings=voice_settings,
-            output_format=output_format,
+            output_format=request.output_format,
         )
 
-    encoded_path, content_type = encode_audio(audio_path, output_format)
+    encoded_path, content_type = encode_audio(audio_path, request.output_format)
 
     audio_data = encoded_path.read_bytes()
     encoded_path.unlink()
@@ -84,25 +101,21 @@ async def text_to_speech(
 @app.post("/v1/text-to-speech/{voice_id}/stream")
 async def text_to_speech_stream(
     voice_id: str,
-    text: str = Query(..., min_length=1),
-    model_id: Optional[str] = Query(None),
-    voice_settings: Optional[Dict[str, Any]] = Query(None),
-    output_format: str = Query("mp3_44100_128"),
+    request: TTSRequest,
     _: str = Depends(verify_api_key),
 ):
-    if voice_settings is None:
-        voice_settings = {}
+    voice_settings = request.voice_settings or {}
 
     async with semaphore:
         audio_path, job_metadata = await qwen_engine.synthesize(
-            text=text,
+            text=request.text,
             voice_id=voice_id,
             voice_store=voice_store,
             voice_settings=voice_settings,
-            output_format=output_format,
+            output_format=request.output_format,
         )
 
-    encoded_path, content_type = encode_audio(audio_path, output_format)
+    encoded_path, content_type = encode_audio(audio_path, request.output_format)
 
     audio_data = encoded_path.read_bytes()
     encoded_path.unlink()
@@ -182,15 +195,14 @@ async def add_voice(
 
 @app.post("/v1/voices/design")
 async def design_voice(
-    name: str = Query(...),
-    prompt: str = Query(...),
-    sample_text: Optional[str] = Query(None),
-    labels: Optional[Dict[str, str]] = Query(None),
+    request: DesignVoiceRequest,
     _: str = Depends(verify_api_key),
 ):
     async with semaphore:
         audio, design_info = await qwen_engine.design_voice(
-            name=name, prompt=prompt, sample_text=sample_text
+            name=request.name,
+            prompt=request.prompt,
+            sample_text=request.sample_text,
         )
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -199,12 +211,15 @@ async def design_voice(
         sf.write(str(anchor_path), audio, 16000)
 
         voice = voice_store.create_voice(
-            name=name,
+            name=request.name,
             anchor_wav_path=anchor_path,
-            labels=labels or {},
+            labels=request.labels or {},
             category="designed",
             method="design",
-            prompts={"prompt": prompt, "sample_text": design_info.get("sample_text")},
+            prompts={
+                "prompt": request.prompt,
+                "sample_text": design_info.get("sample_text"),
+            },
         )
 
         return voice
@@ -213,26 +228,23 @@ async def design_voice(
 @app.post("/v1/text-to-speech/{voice_id}/batch")
 async def batch_tts(
     voice_id: str,
-    texts: List[str] = Query(...),
-    output_format: str = Query("mp3_44100_128"),
-    voice_settings: Optional[Dict[str, Any]] = Query(None),
+    request: BatchTTSRequest,
     _: str = Depends(verify_api_key),
 ):
-    if voice_settings is None:
-        voice_settings = {}
+    voice_settings = request.voice_settings or {}
 
     output_paths = []
 
     async with semaphore:
-        for i, text in enumerate(texts):
+        for i, text in enumerate(request.texts):
             audio_path, job_metadata = await qwen_engine.synthesize(
                 text=text,
                 voice_id=voice_id,
                 voice_store=voice_store,
                 voice_settings=voice_settings,
-                output_format=output_format,
+                output_format=request.output_format,
             )
-            encoded_path, _ = encode_audio(audio_path, output_format)
+            encoded_path, _ = encode_audio(audio_path, request.output_format)
             output_paths.append(encoded_path)
             audio_path.unlink()
 
