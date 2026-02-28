@@ -75,19 +75,4 @@ echo "[info] Starting Supervisor..." | ts '%Y-%m-%d %H:%M:%.S'
 
 exec 1>&3 2>&4
 
-cat > /etc/supervisor/conf.d/qwen3-tts.conf << 'SUPERVISOR_EOF'
-[program:qwen3-tts]
-command=uvicorn app.main:app --host 0.0.0.0 --port 3004
-directory=/app
-environment=PYTHONUNBUFFERED="1"
-stdout_logfile=/config/qwen3-tts.log
-stderr_logfile=/config/qwen3-tts.err
-stdout_logfile_maxbytes=10MB
-stderr_logfile_maxbytes=10MB
-autorestart=true
-startsecs=5
-stopwaitsecs=30
-user=nobody
-SUPERVISOR_EOF
-
 exec /usr/bin/supervisord -c /etc/supervisord.conf -n

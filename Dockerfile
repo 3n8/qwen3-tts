@@ -12,11 +12,16 @@ ENV HOME=/home/nobody \
     LANG=en_GB.UTF-8 \
     PATH=/usr/local/bin/system/scripts/docker:/usr/local/bin/run:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
     HIP_VISIBLE_DEVICES=0 \
     HSA_OVERRIDE_GFX_VERSION= \
     MAX_CONCURRENCY=1 \
     MAX_CHUNK_CHARS=700 \
-    PORT=3004
+    PORT=3004 \
+    VOICES_DIR=/voices \
+    MODELS_DIR=/models \
+    OUT_DIR=/out \
+    HF_CACHE_DIR=/root/.cache/huggingface
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
@@ -25,7 +30,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         jq \
         tzdata \
         moreutils \
-        shadow-utils \
         supervisor \
         dumb-init \
         ffmpeg \
@@ -39,6 +43,7 @@ RUN useradd -m -s /bin/bash nobody || true
 
 COPY build/common/root/install.sh /tmp/install.sh
 COPY build/common/root/supervisord.conf /etc/supervisord.conf
+COPY build/common/root/qwen3-tts.conf /etc/supervisor/conf.d/qwen3-tts.conf
 COPY build/common/root/init.sh /usr/bin/init.sh
 COPY build/common/root/utils.sh /usr/local/bin/system/scripts/docker/utils.sh
 
