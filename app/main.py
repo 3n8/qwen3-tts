@@ -181,6 +181,10 @@ async def add_voice(
             input_path, enable_vad=True, temp_dir=temp_path
         )
 
+        from app.qwen_engine import transcribe_audio
+
+        ref_text = transcribe_audio(anchor_path)
+
         voice = voice_store.create_voice(
             name=name,
             anchor_wav_path=anchor_path,
@@ -188,6 +192,7 @@ async def add_voice(
             category="cloned",
             method="clone",
             source=url if url else "upload",
+            ref_text=ref_text,
         )
 
         return voice

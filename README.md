@@ -1,6 +1,6 @@
 # Qwen3-TTS
 
-Self-hosted Qwen3-TTS service intended as a practical drop-in replacement for ElevenLabs TTS (ComfyUI nodes + typical web apps).
+Self-hosted Qwen3-TTS service built on [arch-base-image](https://github.com/3n8/arch-base-image), intended as a practical drop-in replacement for ElevenLabs TTS (ComfyUI nodes + typical web apps).
 
 ## Features
 
@@ -9,6 +9,7 @@ Self-hosted Qwen3-TTS service intended as a practical drop-in replacement for El
 - **ElevenLabs-Compatible API**: Works with common ElevenLabs clients
 - **GPU-Accelerated**: AMD GPU with ROCm 6.4 support
 - **Media Preprocessing**: FFmpeg + VAD trimming for clean voice clones
+- **Arch Linux Base**: Built on [arch-base-image](https://github.com/3n8/arch-base-image) for minimal image size
 
 ## Requirements
 
@@ -39,8 +40,8 @@ Or create a `docker-compose.yml`:
 
 ```yaml
 services:
-  qwen3-tts:
-    image: ghcr.io/3n8/qwen3-tts:latest
+  arch-qwen3-tts:
+    image: ghcr.io/3n8/arch-qwen3-tts:latest
     container_name: qwen3-tts
     restart: unless-stopped
     user: "${PUID}:${PGID}"
@@ -53,7 +54,7 @@ services:
       - /opt/appdata/qwen3-tts/models:/models
       - /opt/appdata/qwen3-tts/voices:/voices
       - /opt/appdata/qwen3-tts/out:/out
-      - /opt/appdata/qwen3-tts/hf_cache:/root/.cache/huggingface
+      - /opt/appdata/qwen3-tts/hf_cache:/.cache/huggingface
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri
@@ -189,6 +190,8 @@ curl -s -H "x-tts-api-key: your-secret-api-key" \
 | `HSA_OVERRIDE_GFX_VERSION` | (empty) | Set to 11.0.0 if AMD GPU not detected |
 | `MAX_CONCURRENCY` | 1 | Max concurrent synthesis requests |
 | `MAX_CHUNK_CHARS` | 700 | Max characters per text chunk |
+| `HF_HOME` | /.cache/huggingface | HuggingFace cache location |
+| `HF_CACHE_DIR` | /.cache/huggingface | HuggingFace cache location |
 | `HF_REV_BASE` | (empty) | HuggingFace revision for Base model |
 | `HF_REV_DESIGN` | (empty) | HuggingFace revision for Design model |
 
@@ -231,7 +234,238 @@ Voices are stored at `/voices/{voice_id}/`:
 - **Qwen/Qwen3-TTS-12Hz-1.7B-Base**: Production generation (cloning from anchor.wav)
 - **Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign**: AI voice generation (design endpoint)
 
-Models are cached at `/models` and HuggingFace cache at `/root/.cache/huggingface`.
+Models are cached at `/models` and HuggingFace cache at `/.cache/huggingface`.
+
+## Creating High-Quality Voice Clones
+
+This guide explains how to create the best possible voice clones using Qwen3-TTS with In-Context Learning (ICL) mode.
+
+### Why ICL Mode Matters
+
+The system now uses **ICL (In-Context Learning) mode** which:
+- Preserves the original speaker's **speaking pace/rhythm**
+- Maintains **prosody and intonation**
+- Keeps **natural pauses**
+- Retains **emotional tone**
+
+Without ICL, voices often speak too fast compared to the original.
+
+### Quick Start (For Me)
+
+```bash
+# Download audio from YouTube
+yt-dlp -x --audio-format wav "VIDEO_URL" -o /tmp/voice_name.wav
+
+# Trim to 2-5 minutes (longer = better quality)
+ffmpeg -y -i /tmp/voice_name.wav -t 300 -ar 16000 -ac 1 /tmp/voice_trimmed.wav
+
+# Copy to hel and create voice
+docker cp /tmp/voice_trimmed.wav hel:/tmp/
+ssh hel 'docker exec qwen3-tts curl -s -X POST "http://localhost:3004/v1/voices/add" \
+  -H "x-tts-api-key: YOUR_API_KEY" \
+  -F "name=Voice Name" \
+  -F "file=@/tmp/voice_trimmed.wav"'
+
+# Generate speech
+ssh hel 'docker exec qwen3-tts curl -s -X POST "http://localhost:3004/v1/text-to-speech/Voice_ID" \
+  -H "x-tts-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"text\": \"Hello there good boy I have been waiting for you\", \"output_format\": \"mp3_44100_128\"}" \
+  -o /out/output.mp3'
+```
+
+### Quick YouTube Clone Workflow (60-second samples)
+
+This is the streamlined workflow for creating voice clones from YouTube videos with 60-second samples.
+
+#### Step 1: Download Audio (first 60 seconds)
+
+```bash
+yt-dlp -x --audio-format wav --download-sections "*0-60" -o /tmp/{voice_name}.wav {youtube_url}
+```
+
+Example:
+```bash
+yt-dlp -x --audio-format wav --download-sections "*0-60" -o /tmp/stuffie.wav https://www.youtube.com/watch?v=DunosrOLIDI
+```
+
+#### Step 2: Download Subtitles
+
+```bash
+yt-dlp --write-auto-subs --sub-lang en --convert-subs srt -o /tmp/{voice_name} {youtube_url}
+```
+
+#### Step 3: Prepare Audio
+
+Trim to 60 seconds, 16kHz mono for voice cloning:
+
+```bash
+ffmpeg -y -i /tmp/{voice_name}.wav -t 60 -ar 16000 -ac 1 /tmp/{voice_name}_60s.wav
+```
+
+#### Step 4: Extract Text from Subtitles
+
+Use Python to extract text from the first 60 seconds of subtitles:
+
+```python
+import re
+
+with open("/tmp/{voice_name}.en.srt", "r") as f:
+    content = f.read()
+
+texts = []
+for block in content.split("\n\n"):
+    lines = block.strip().split("\n")
+    if len(lines) >= 3:
+        timecode = lines[1]
+        match = re.match(r"(\d+):(\d+):(\d+),(\d+)", timecode.split("-->")[0].strip())
+        if match:
+            hours, mins, secs, ms = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+            total_secs = hours * 3600 + mins * 60 + secs + ms/1000
+            if total_secs <= 60:
+                text = " ".join(lines[2:]).strip()
+                if text:
+                    texts.append(text)
+
+# Deduplicate while preserving order
+seen = set()
+unique_texts = []
+for t in texts:
+    if t not in seen:
+        seen.add(t)
+        unique_texts.append(t)
+
+result = " ".join(unique_texts)
+print(result)
+```
+
+#### Step 5: Create Voice
+
+```bash
+curl -s -X POST "http://localhost:3004/v1/voices/add" \
+  -H "x-tts-api-key: YOUR_API_KEY" \
+  -F "name={voice_name}" \
+  -F "file=@/tmp/{voice_name}_60s.wav"
+```
+
+Save the returned `voice_id` for the next step.
+
+#### Step 6: Generate TTS
+
+Using Python (recommended for longer text):
+
+```python
+import requests
+
+text = "Your extracted subtitle text here"
+voice_id = "voice_id_from_step_5"
+url = f"http://localhost:3004/v1/text-to-speech/{voice_id}"
+headers = {
+    "x-tts-api-key": "YOUR_API_KEY",
+    "Content-Type": "application/json"
+}
+data = {
+    "text": text,
+    "output_format": "mp3_44100_128"
+}
+
+resp = requests.post(url, headers=headers, json=data)
+with open("/out/{voice_name}_qwen3_v1.mp3", "wb") as f:
+    f.write(resp.content)
+```
+
+**Important Notes:**
+- If the API returns 500 error, the text is too long. Split into shorter chunks and concatenate results.
+- For best results, use 30-60 seconds of clean audio for voice cloning.
+- Check output duration - if under 30s, repeat the text to reach desired length.
+
+### Detailed Guide (For Future Reference)
+
+#### Step 1: Download Audio from YouTube
+
+```bash
+# Full video audio
+yt-dlp -x --audio-format wav "https://www.youtube.com/watch?v=VIDEO_ID" -o /tmp/voice_name.wav
+
+# From specific timestamp (if provided)
+yt-dlp -x --audio-format wav "https://youtu.be/VIDEO_ID?t=278" -o /tmp/voice_name.wav
+```
+
+#### Step 2: Trim to Best Segment
+
+- **Recommended duration**: 2-5 minutes
+- **Use the most expressive/characteristic parts** of the audio
+- **Avoid** background music, silences, or noisy sections
+
+```bash
+# Trim to 2 minutes (from start)
+ffmpeg -y -i input.wav -t 120 -ar 16000 -ac 1 output.wav
+
+# Trim from specific time
+ffmpeg -y -i input.wav -ss 00:05:00 -t 120 -ar 16000 -ac 1 output.wav
+```
+
+#### Step 3: Create Voice
+
+The API automatically transcribes audio using Whisper and uses ICL mode:
+
+```bash
+curl -s -X POST "http://localhost:3004/v1/voices/add" \
+  -H "x-tts-api-key: YOUR_API_KEY" \
+  -F "name=Voice Name" \
+  -F "file=@/path/to/audio.wav"
+```
+
+Returns:
+```json
+{
+  "voice_id": "abc123...",
+  "name": "Voice Name",
+  "category": "cloned"
+}
+```
+
+#### Step 4: Generate Speech
+
+```bash
+# MP3 output
+curl -s -X POST "http://localhost:3004/v1/text-to-speech/Voice_ID" \
+  -H "x-tts-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello there, good boy. I have been waiting for you.",
+    "output_format": "mp3_44100_128"
+  }' -o output.mp3
+
+# WAV output
+curl -s -X POST "http://localhost:3004/v1/text-to-speech/Voice_ID" \
+  -H "x-tts-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Hello world!", "output_format": "wav"}' -o output.wav
+```
+
+### Troubleshooting: Voice Still Speaks Too Fast
+
+1. **Use longer reference audio** - More audio = better pacing capture
+2. **Use clearer audio** - Avoid background music/noise
+3. **Post-process with ffmpeg** (last resort):
+```bash
+# Slow down by 15%
+ffmpeg -i input.mp3 -filter:a "atempo=0.85" output.mp3
+```
+
+### Voice ID Reference (Current Voices)
+
+| Name | Voice ID | Notes |
+|------|----------|-------|
+| stuffie | 94ac1e95-6139-4666-b393-b27ceeafc32b | ICL mode |
+| simone_asmr | 98976448-84c1-4427-95cf-78afd32165bf | ICL mode |
+| yumi_mommy_asmr_1 | 42997ffa-b772-452c-bc97-69ec9184ec69 | ICL mode |
+| yumi_mommy_asmr_2 | 3ffaec3c-46f9-46df-976a-0084eb17290c | ICL mode |
+
+### API Key
+
+Use: `VJcCJrs46L7bdzKrSgsbYlrgZ`
 
 ## License
 

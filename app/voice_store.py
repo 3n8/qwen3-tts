@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -93,13 +94,15 @@ class VoiceStore:
         method: str = "clone",
         prompts: Optional[Dict[str, Any]] = None,
         source: Optional[str] = None,
+        ref_text: Optional[str] = None,
     ) -> Dict[str, Any]:
         voice_id = str(uuid.uuid4())
         voice_dir = self.voices_dir / voice_id
         voice_dir.mkdir(parents=True, exist_ok=True)
 
         anchor_dest = voice_dir / "anchor.wav"
-        anchor_wav_path.rename(anchor_dest)
+        shutil.copy2(anchor_wav_path, anchor_dest)
+        anchor_wav_path.unlink()
 
         hf_rev_base = os.getenv("HF_REV_BASE", "")
         hf_rev_design = os.getenv("HF_REV_DESIGN", "")
@@ -113,6 +116,7 @@ class VoiceStore:
             "method": method,
             "prompts": prompts or {},
             "source": source,
+            "ref_text": ref_text or "",
             "voice_version": 1,
             "model_revisions": {
                 "base": hf_rev_base or "default",

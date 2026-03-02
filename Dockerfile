@@ -10,6 +10,7 @@ ARG TARGETARCH=amd64
 ENV HOME=/home/nobody \
     TERM=xterm \
     LANG=en_GB.UTF-8 \
+    LC_ALL=en_GB.UTF-8 \
     PATH=/usr/local/bin/system/scripts/docker:/usr/local/bin/run:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
@@ -33,21 +34,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         tzdata \
         moreutils \
         supervisor \
-        dumb-init \
         ffmpeg \
         libsndfile1 \
         sox \
         git \
         wget \
+        dumb-init \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash nobody || true
 
 COPY build/common/root/install.sh /tmp/install.sh
 COPY build/common/root/supervisord.conf /etc/supervisord.conf
-COPY build/common/root/qwen3-tts.conf /etc/supervisor/conf.d/qwen3-tts.conf
 COPY build/common/root/init.sh /usr/bin/init.sh
 COPY build/common/root/utils.sh /usr/local/bin/system/scripts/docker/utils.sh
+COPY build/common/root/qwen3-tts.conf /etc/supervisor/conf.d/qwen3-tts.conf
 
 RUN chmod +x /tmp/install.sh && /tmp/install.sh; rm -f /tmp/install.sh; \
     chmod +x /usr/bin/init.sh && \

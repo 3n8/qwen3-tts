@@ -23,6 +23,44 @@ MODEL_DESIGN = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
 
 MAX_CHUNK_CHARS = int(os.getenv("MAX_CHUNK_CHARS", "700"))
 
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
+
+_voice_clone_prompts: Dict[str, Any] = {}
+_whisper_model = None
+
+
+def _get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        try:
+            from faster_whisper import WhisperModel
+
+            print(f"Loading Whisper model: {WHISPER_MODEL}")
+            _whisper_model = WhisperModel(
+                WHISPER_MODEL, device="auto", compute_type="int8"
+            )
+            print("Whisper model loaded successfully")
+        except Exception as e:
+            print(f"Warning: Could not load Whisper model: {e}")
+            _whisper_model = False
+    return _whisper_model
+
+
+def transcribe_audio(audio_path: Path) -> str:
+    """Transcribe audio using Whisper to get ref_text for ICL mode."""
+    model = _get_whisper_model()
+    if not model:
+        return ""
+
+    try:
+        segments, info = model.transcribe(str(audio_path), language="en")
+        transcript = " ".join([segment.text for segment in segments])
+        print(f"Transcribed: {transcript[:100]}...")
+        return transcript.strip()
+    except Exception as e:
+        print(f"Warning: Transcription failed: {e}")
+        return ""
+
 
 class QwenEngine:
     def __init__(self):
@@ -123,23 +161,93 @@ class QwenEngine:
 
         return chunks
 
-    def _generate_audio(self, text: str, prompt_audio: Optional[Path] = None) -> tuple:
+    def _build_voice_clone_prompt(
+        self, prompt_audio: Path, ref_text: str = None
+    ) -> Any:
+        """Build and cache voice clone prompt for a given anchor audio."""
+        voice_key = str(prompt_audio)
+
+        if voice_key in _voice_clone_prompts:
+            print(f"Using cached voice clone prompt for {prompt_audio.name}")
+            return _voice_clone_prompts[voice_key]
+
         if self.base_model is None:
             raise RuntimeError("Base model not loaded")
 
-        if prompt_audio and prompt_audio.exists():
+        prompt_wave, prompt_sr = sf.read(str(prompt_audio), dtype="float32")
+        if len(prompt_wave.shape) > 1:
+            prompt_wave = prompt_wave.mean(axis=1)
+
+        if not ref_text:
+            ref_text = transcribe_audio(prompt_audio)
+            if not ref_text:
+                print("Warning: No ref_text available, using x_vector_only_mode=True")
+                return None
+
+        print(f"Building voice clone prompt with ref_text: {ref_text[:50]}...")
+
+        prompt = self.base_model.create_voice_clone_prompt(
+            ref_audio=(prompt_wave, prompt_sr),
+            ref_text=ref_text,
+            x_vector_only_mode=False,
+        )
+
+        _voice_clone_prompts[voice_key] = prompt
+        print(f"Cached voice clone prompt for {prompt_audio.name}")
+
+        return prompt
+
+    def _generate_audio(
+        self,
+        text: str,
+        prompt_audio: Optional[Path] = None,
+        ref_text: Optional[str] = None,
+        voice_prompt: Any = None,
+    ) -> tuple:
+        if self.base_model is None:
+            raise RuntimeError("Base model not loaded")
+
+        generation_kwargs = {
+            "temperature": 0.8,
+            "top_p": 0.95,
+            "do_sample": True,
+        }
+
+        if voice_prompt is not None:
+            wavs, sr = self.base_model.generate_voice_clone(
+                text=text,
+                voice_clone_prompt=voice_prompt,
+                language="English",
+                **generation_kwargs,
+            )
+        elif prompt_audio and prompt_audio.exists():
             prompt_wave, prompt_sr = sf.read(str(prompt_audio), dtype="float32")
             if len(prompt_wave.shape) > 1:
                 prompt_wave = prompt_wave.mean(axis=1)
-            wavs, sr = self.base_model.generate(
-                text=text,
-                reference_audio=prompt_wave,
-                language="English",
-            )
+
+            if ref_text:
+                wavs, sr = self.base_model.generate_voice_clone(
+                    text=text,
+                    ref_audio=(prompt_wave, prompt_sr),
+                    ref_text=ref_text,
+                    x_vector_only_mode=False,
+                    language="English",
+                    **generation_kwargs,
+                )
+            else:
+                wavs, sr = self.base_model.generate_voice_clone(
+                    text=text,
+                    ref_audio=(prompt_wave, prompt_sr),
+                    ref_text=text,
+                    x_vector_only_mode=True,
+                    language="English",
+                    **generation_kwargs,
+                )
         else:
-            wavs, sr = self.base_model.generate(
+            wavs, sr = self.base_model.generate_voice_clone(
                 text=text,
                 language="English",
+                **generation_kwargs,
             )
 
         return wavs[0], sr
@@ -148,10 +256,17 @@ class QwenEngine:
         if self.design_model is None:
             raise RuntimeError("Design model not loaded")
 
-        wavs, sr = self.design_model.generate_custom_voice(
+        generation_kwargs = {
+            "temperature": 0.8,
+            "top_p": 0.95,
+            "do_sample": True,
+        }
+
+        wavs, sr = self.design_model.generate_voice_design(
             text=sample_text,
-            language="English",
             instruct=prompt,
+            language="English",
+            **generation_kwargs,
         )
 
         return wavs[0], sr
@@ -168,6 +283,18 @@ class QwenEngine:
 
         anchor_path = voice_store.get_anchor_wav_path(voice_id)
 
+        voice_metadata = voice_store.get_voice(voice_id)
+        ref_text = voice_metadata.get("metadata", {}).get("ref_text")
+
+        voice_prompt = None
+        if anchor_path.exists():
+            loop = asyncio.get_event_loop()
+
+            def build_prompt():
+                return self._build_voice_clone_prompt(anchor_path, ref_text)
+
+            voice_prompt = await loop.run_in_executor(None, build_prompt)
+
         chunks = self._split_text_into_chunks(text)
 
         if not chunks:
@@ -181,7 +308,7 @@ class QwenEngine:
             print(f"Generating chunk {i + 1}/{len(chunks)}: {chunk[:50]}...")
 
             def _gen():
-                return self._generate_audio(chunk, anchor_path)
+                return self._generate_audio(chunk, anchor_path, ref_text, voice_prompt)
 
             audio, sr = await loop.run_in_executor(None, _gen)
             audio_chunks.append((audio, sr))
