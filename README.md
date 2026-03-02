@@ -10,6 +10,18 @@ Self-hosted Qwen3-TTS service built on [arch-base-image](https://github.com/3n8/
 - **GPU-Accelerated**: AMD GPU with ROCm 6.4 support
 - **Media Preprocessing**: FFmpeg + VAD trimming for clean voice clones
 - **Arch Linux Base**: Built on [arch-base-image](https://github.com/3n8/arch-base-image) for minimal image size
+- **Speech-to-Text**: Transcription with speaker diarization support
+- **YouTube Integration**: Download audio and subtitles directly from YouTube
+
+## Tools Included
+
+| Tool | Purpose |
+|------|---------|
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Download audio/video from YouTube and other sites |
+| [ffmpeg](https://ffmpeg.org) | Audio/video processing, format conversion |
+| [Qwen3-TTS](https://github.com/Qwen/Qwen3-TTS) | Text-to-speech generation with voice cloning |
+| [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | Speech-to-text transcription (fallback) |
+| [pyannote.audio](https://github.com/pyannote/pyannote-audio) | Speaker diarization (who spoke when) |
 
 ## Requirements
 
@@ -278,6 +290,8 @@ ssh hel 'docker exec qwen3-tts curl -s -X POST "http://localhost:3004/v1/text-to
 
 This is the streamlined workflow for creating voice clones from YouTube videos with 60-second samples.
 
+**Important: We use YouTube subtitles as the primary text source, NOT Whisper transcription.** This is faster and more accurate for YouTube content.
+
 #### Step 1: Download Audio (first 60 seconds)
 
 ```bash
@@ -290,6 +304,8 @@ yt-dlp -x --audio-format wav --download-sections "*0-60" -o /tmp/stuffie.wav htt
 ```
 
 #### Step 2: Download Subtitles
+
+**Always prefer subtitles over Whisper transcription** - they're faster and more accurate for YouTube content.
 
 ```bash
 yt-dlp --write-auto-subs --sub-lang en --convert-subs srt -o /tmp/{voice_name} {youtube_url}

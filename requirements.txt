@@ -16,3 +16,5 @@ tqdm==4.67.1
 qwen-tts
 numba
 faster-whisper
+pyannote.audio
+pyannote.pipeline

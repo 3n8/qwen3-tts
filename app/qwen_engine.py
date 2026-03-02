@@ -62,6 +62,129 @@ def transcribe_audio(audio_path: Path) -> str:
         return ""
 
 
+_pyannote_pipeline = None
+
+
+def _get_pyannote_pipeline():
+    global _pyannote_pipeline
+    if _pyannote_pipeline is None:
+        try:
+            from pyannote.audio import Pipeline
+
+            print("Loading pyannote speaker diarization pipeline...")
+            _pyannote_pipeline = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-3.1", use_auth_token=None
+            )
+            print("Pyannote pipeline loaded successfully")
+        except Exception as e:
+            print(f"Warning: Could not load pyannote pipeline: {e}")
+            _pyannote_pipeline = False
+    return _pyannote_pipeline
+
+
+def transcribe_with_timestamps(
+    audio_path: Path,
+    language: Optional[str] = None,
+    timestamps_granularity: str = "word",
+    diarize: bool = False,
+) -> Dict[str, Any]:
+    """
+    Transcribe audio with word-level timestamps and optionally diarization.
+
+    Returns:
+        {
+            "text": "transcribed text",
+            "language_code": "en",
+            "language_probability": 0.99,
+            "words": [{"text": "...", "start": 0.0, "end": 0.5, "type": "word", "logprob": -0.5, ...}]
+        }
+    """
+    import torch
+
+    model = _get_whisper_model()
+    if not model:
+        return {
+            "text": "",
+            "language_code": "en",
+            "language_probability": 0.0,
+            "words": [],
+        }
+
+    try:
+        # Run transcription
+        segments, info = model.transcribe(str(audio_path), language=language or "en")
+
+        language_code = info.language or "en"
+        language_prob = info.language_probability or 0.0
+
+        words = []
+        full_text_parts = []
+
+        for segment in segments:
+            if timestamps_granularity == "word" and segment.words:
+                for word in segment.words:
+                    word_data = {
+                        "text": word.word,
+                        "start": word.start,
+                        "end": word.end,
+                        "type": "word",
+                        "logprob": word.probability
+                        if hasattr(word, "probability")
+                        else -0.5,
+                    }
+                    words.append(word_data)
+                    full_text_parts.append(word.word)
+            else:
+                # No word-level timestamps, just use segment
+                if segment.text:
+                    words.append(
+                        {
+                            "text": segment.text.strip(),
+                            "start": segment.start,
+                            "end": segment.end,
+                            "type": "word",
+                            "logprob": -0.5,
+                        }
+                    )
+                    full_text_parts.append(segment.text)
+
+        # Run diarization if requested
+        speaker_labels = {}
+        if diarize:
+            pipeline = _get_pyannote_pipeline()
+            if pipeline:
+                try:
+                    # Run on CPU since we're already using GPU for whisper if available
+                    diarization = pipeline(audio_path, min_speakers=1, max_speakers=10)
+
+                    # Create a mapping of time -> speaker
+                    for turn, _, speaker in diarization.itertracks(yield_label=True):
+                        for word in words:
+                            if word["start"] >= turn.start and word["end"] <= turn.end:
+                                word["speaker"] = speaker
+                                speaker_labels[speaker] = True
+                except Exception as e:
+                    print(f"Warning: Diarization failed: {e}")
+
+        text = " ".join(full_text_parts)
+
+        return {
+            "text": text,
+            "language_code": language_code,
+            "language_probability": language_prob,
+            "words": words,
+        }
+
+    except Exception as e:
+        print(f"Warning: Transcription with timestamps failed: {e}")
+        return {
+            "text": "",
+            "language_code": "en",
+            "language_probability": 0.0,
+            "words": [],
+        }
+
+
 class QwenEngine:
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"

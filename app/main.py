@@ -14,7 +14,7 @@ import soundfile as sf
 
 from app.auth import verify_api_key
 from app.voice_store import voice_store
-from app.qwen_engine import qwen_engine
+from app.qwen_engine import qwen_engine, transcribe_with_timestamps
 from app.preprocess import preprocess_audio, download_file
 from app.audio_formats import encode_audio, get_content_type
 
@@ -266,6 +266,37 @@ async def batch_tts(
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=batch_output.zip"},
     )
+
+
+@app.post("/v1/speech-to-text")
+async def speech_to_text(
+    file: UploadFile = File(...),
+    model_id: Optional[str] = Form(None),
+    language_code: Optional[str] = Form(None),
+    timestamps_granularity: Optional[str] = Form("word"),
+    diarize: Optional[bool] = Form(False),
+    _: str = Depends(verify_api_key),
+):
+    """ElevenLabs-compatible speech-to-text transcription."""
+
+    # Save uploaded file to temp
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        audio_path = temp_path / file.filename
+
+        # Write uploaded content
+        content = await file.read()
+        audio_path.write_bytes(content)
+
+        # Run transcription
+        result = transcribe_with_timestamps(
+            audio_path=audio_path,
+            language=language_code,
+            timestamps_granularity=timestamps_granularity or "word",
+            diarize=diarize or False,
+        )
+
+    return result
 
 
 @app.get("/v1/user/subscription")
