@@ -24,7 +24,9 @@ ENV HOME=/home/nobody \
     OUT_DIR=/out \
     HF_HOME=/root/.cache/huggingface \
     HF_CACHE_DIR=/root/.cache/huggingface \
-    NUMBA_CACHE_DIR=/tmp/numba_cache
+    NUMBA_CACHE_DIR=/tmp/numba_cache \
+    PYTORCH_TUNABLEOP_ENABLED=1 \
+    OMP_NUM_THREADS=16
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \

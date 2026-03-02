@@ -7,21 +7,51 @@ Self-hosted Qwen3-TTS service built on [arch-base-image](https://github.com/3n8/
 - **Best Audio Quality**: Uses Qwen3-TTS 12Hz 1.7B Base and VoiceDesign models
 - **Voice Persistence**: Anchor.wav pattern ensures consistent voice identity across restarts
 - **ElevenLabs-Compatible API**: Works with common ElevenLabs clients
-- **GPU-Accelerated**: AMD GPU with ROCm 6.4 support
+- **GPU-Accelerated**: AMD GPU with ROCm 6.4 support (NVIDIA-optimized with torch.compile)
 - **Media Preprocessing**: FFmpeg + VAD trimming for clean voice clones
 - **Arch Linux Base**: Built on [arch-base-image](https://github.com/3n8/arch-base-image) for minimal image size
 - **Speech-to-Text**: Transcription with speaker diarization support
 - **YouTube Integration**: Download audio and subtitles directly from YouTube
 
-## Tools Included
+## API Reference
 
-| Tool | Purpose |
-|------|---------|
-| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Download audio/video from YouTube and other sites |
-| [ffmpeg](https://ffmpeg.org) | Audio/video processing, format conversion |
-| [Qwen3-TTS](https://github.com/Qwen/Qwen3-TTS) | Text-to-speech generation with voice cloning |
-| [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | Speech-to-text transcription (fallback) |
-| [pyannote.audio](https://github.com/pyannote/pyannote-audio) | Speaker diarization (who spoke when) |
+All endpoints (except `/healthz`) require authentication via header:
+
+| Header | Description |
+|--------|-------------|
+| `x-tts-api-key` | Primary API key (recommended) |
+| `xi-api-key` | ElevenLabs-compatible |
+| `x-api-key` | Alternative |
+| `Authorization: Bearer <key>` | Bearer token |
+
+### Endpoints
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| GET | `/healthz` | Health check | No |
+| GET | `/v1/voices` | List all voices | Yes |
+| GET | `/v1/voices/{voice_id}` | Get voice details | Yes |
+| POST | `/v1/voices/add` | Create voice from file/URL | Yes |
+| POST | `/v1/voices/design` | AI-generate new voice | Yes |
+| POST | `/v1/voices/clone` | One-command YouTube clone | Yes |
+| POST | `/v1/voices/add-from-url` | Download from URL | Yes |
+| POST | `/v1/voices/clone-multispeaker` | Clone multiple speakers | Yes |
+| POST | `/v1/text-to-speech/{voice_id}` | Generate TTS | Yes |
+| POST | `/v1/text-to-speech/{voice_id}/stream` | Stream TTS | Yes |
+| POST | `/v1/text-to-speech/{voice_id}/batch` | Batch TTS | Yes |
+| POST | `/v1/speech-to-text` | Transcribe audio | Yes |
+| GET | `/v1/models` | List available models | Yes |
+| GET | `/v1/user/subscription` | Subscription info | Yes |
+
+### Error Responses
+
+| Code | Message | Description |
+|------|---------|-------------|
+| 401 | `API key required...` | Missing authentication header |
+| 401 | `Invalid API key` | Wrong API key |
+| 500 | `TTS_API_KEY not configured` | Server misconfigured |
+| 404 | `Voice not found` | Invalid voice_id |
+| 422 | Validation error | Invalid request body |
 
 ## Requirements
 
@@ -329,6 +359,8 @@ Voices are stored at `/voices/{voice_id}/`:
 
 Models are cached at `/models` and HuggingFace cache at `/.cache/huggingface`.
 
+> **Note**: Both models use `torch.compile(mode="max-autotune")` for inference optimization. This provides significant speedup on NVIDIA GPUs. On AMD ROCm, the benefit is minimal but the code remains compatible.
+
 ## Creating High-Quality Voice Clones
 
 This guide explains how to create the best possible voice clones using Qwen3-TTS with In-Context Learning (ICL) mode.
@@ -502,12 +534,12 @@ with open("/out/{voice_name}_qwen3_v1.mp3", "wb") as f:
 
 ### Voice ID Reference (Current Voices)
 
-| Name | Voice ID | Notes |
-|------|----------|-------|
-| stuffie | 94ac1e95-6139-4666-b393-b27ceeafc32b | ICL mode |
-| simone_asmr | 98976448-84c1-4427-95cf-78afd32165bf | ICL mode |
-| yumi_mommy_asmr_1 | 42997ffa-b772-452c-bc97-69ec9184ec69 | ICL mode |
-| yumi_mommy_asmr_2 | 3ffaec3c-46f9-46df-976a-0084eb17290c | ICL mode |
+| Name | Voice ID | Duration |
+|------|----------|----------|
+| stuffie | fb83c976-6666-4c9d-ae29-9373b4de6f9a | 20 min |
+| simone_asmr | 6363a96a-c7cc-499f-abbe-24739dd4098e | 5 min |
+| yumi_mommy_asmr_1 | f3d35561-5e5d-48c4-85bf-a8d139ad2d72 | 5 min |
+| yumi_mommy_asmr_2 | 42ea2541-d55c-4b69-9faa-23861d18acf9 | 5 min |
 
 ### API Key
 

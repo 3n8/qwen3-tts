@@ -222,6 +222,7 @@ class QwenEngine:
                     dtype=torch.bfloat16,
                     cache_dir=str(HF_CACHE_DIR),
                 )
+                self.base_model = torch.compile(self.base_model, mode="max-autotune")
 
             await loop.run_in_executor(None, _load)
             self.base_model_loaded = True
@@ -245,16 +246,96 @@ class QwenEngine:
                     dtype=torch.bfloat16,
                     cache_dir=str(HF_CACHE_DIR),
                 )
+                self.design_model = torch.compile(
+                    self.design_model, mode="max-autotune"
+                )
 
             await loop.run_in_executor(None, _load)
             self.design_model_loaded = True
             print("Design model loaded successfully")
 
-    def _split_text_into_chunks(self, text: str) -> List[str]:
+    def _split_text_into_chunks(
+        self, text: str, anchor_path: Optional[Path] = None
+    ) -> List[str]:
+        """
+        Split text into chunks using Whisper timestamps from anchor audio for natural pause detection.
+        Falls back to sentence-based splitting if anchor audio unavailable.
+        """
         text = text.strip()
         if not text:
             return []
 
+        # Try to use Whisper timestamps from anchor audio for natural chunking
+        if anchor_path and anchor_path.exists():
+            try:
+                result = transcribe_with_timestamps(
+                    anchor_path, language="en", timestamps_granularity="word"
+                )
+                words = result.get("words", [])
+
+                if words and len(words) > 5:
+                    # Find natural pause points (gaps between words)
+                    # A natural pause is typically > 0.3 seconds
+                    pause_threshold = 0.3
+
+                    pause_points = [0]  # Start with first word
+                    for i in range(1, len(words)):
+                        gap = words[i]["start"] - words[i - 1]["end"]
+                        if gap >= pause_threshold:
+                            pause_points.append(i)
+                    pause_points.append(len(words))  # End
+
+                    # Calculate target chars per chunk based on total text length
+                    total_words = len(words)
+                    avg_chars_per_word = (
+                        len(text) / total_words if total_words > 0 else 5
+                    )
+
+                    # Estimate char count per chunk based on pauses
+                    chunk_size = max(
+                        700, int(avg_chars_per_word * 15)
+                    )  # ~15 words per chunk default
+
+                    # Split at natural pause points, respecting chunk size
+                    word_chunks = []
+                    current_words = []
+                    current_chars = 0
+
+                    for i, word_data in enumerate(words):
+                        word = word_data["text"]
+                        current_words.append(word)
+                        current_chars += len(word) + 1  # +1 for space
+
+                        # Check if we should split here
+                        should_split = False
+
+                        # Split if gap is large enough AND we've accumulated enough chars
+                        if i in pause_points and current_chars >= chunk_size:
+                            should_split = True
+                        # Also split if we've exceeded max chunk size
+                        elif current_chars >= MAX_CHUNK_CHARS:
+                            should_split = True
+
+                        if should_split and current_words:
+                            word_chunks.append(" ".join(current_words))
+                            current_words = []
+                            current_chars = 0
+
+                    # Add remaining words
+                    if current_words:
+                        word_chunks.append(" ".join(current_words))
+
+                    if word_chunks:
+                        print(
+                            f"Whisper chunking: split into {len(word_chunks)} chunks using natural pauses"
+                        )
+                        return [c.strip() for c in word_chunks if c.strip()]
+            except Exception as e:
+                print(
+                    f"Whisper chunking failed: {e}, falling back to sentence splitting"
+                )
+
+        # Fallback: sentence-based splitting
         sentences = re.split(r"(?<=[.!?])\s+", text)
 
         chunks = []
@@ -418,7 +499,7 @@ class QwenEngine:
 
             voice_prompt = await loop.run_in_executor(None, build_prompt)
 
-        chunks = self._split_text_into_chunks(text)
+        chunks = self._split_text_into_chunks(text, anchor_path)
 
         if not chunks:
             raise ValueError("No text to synthesize")
@@ -437,15 +518,25 @@ class QwenEngine:
             audio_chunks.append((audio, sr))
 
         if len(audio_chunks) > 1:
-            silence = np.zeros(int(audio_chunks[0][1] * 0.3), dtype=np.float32)
-            audio = np.concatenate(
-                [audio_chunks[0][0]]
-                + [silence + chunk[0] for chunk in audio_chunks[1:]]
-            )
+            target_sr = audio_chunks[0][1]
+
+            from scipy import signal
+
+            resampled_chunks = []
+            for i, (audio, sr) in enumerate(audio_chunks):
+                if sr != target_sr:
+                    num_samples = int(len(audio) * target_sr / sr)
+                    audio = signal.resample(audio, num_samples)
+                if i > 0:
+                    silence = np.zeros(int(target_sr * 0.3), dtype=np.float32)
+                    audio = np.concatenate([silence, audio])
+                resampled_chunks.append(audio)
+
+            audio = np.concatenate(resampled_chunks)
+            sr = target_sr
         else:
             audio = audio_chunks[0][0]
-
-        sr = audio_chunks[0][1]
+            sr = audio_chunks[0][1]
 
         job_id = str(uuid.uuid4())
         OUT_DIR.mkdir(parents=True, exist_ok=True)
