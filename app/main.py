@@ -572,7 +572,7 @@ async def add_voice_from_url(
                 cmd.extend(["--download-sections", f"*{start_sec}-{start_sec + dur}"])
             elif duration:
                 # Download first N seconds
-                cmd.extend(["--download-sections", f"*{duration}"])
+                cmd.extend(["--download-sections", f"*0-{duration}"])
             else:
                 # Default: first 60 seconds
                 cmd.extend(["--download-sections", "*0-60"])
@@ -685,7 +685,7 @@ async def clone_multispeaker(
                 "--audio-format",
                 "wav",
                 "--download-sections",
-                f"*{duration}",
+                f"*0-{duration}",
                 "-o",
                 f"{temp_prefix}.wav",
                 youtube_url,
