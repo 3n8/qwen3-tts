@@ -222,7 +222,6 @@ class QwenEngine:
                     dtype=torch.bfloat16,
                     cache_dir=str(HF_CACHE_DIR),
                 )
-                self.base_model = torch.compile(self.base_model, mode="max-autotune")
 
             await loop.run_in_executor(None, _load)
             self.base_model_loaded = True
@@ -245,9 +244,6 @@ class QwenEngine:
                     device_map=self.device,
                     dtype=torch.bfloat16,
                     cache_dir=str(HF_CACHE_DIR),
-                )
-                self.design_model = torch.compile(
-                    self.design_model, mode="max-autotune"
                 )
 
             await loop.run_in_executor(None, _load)
