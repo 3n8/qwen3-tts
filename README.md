@@ -52,8 +52,8 @@ Or create a `docker-compose.yml`:
 
 ```yaml
 services:
-  arch-qwen3-tts:
-    image: ghcr.io/3n8/arch-qwen3-tts:latest
+  qwen3-tts:
+    image: ghcr.io/3n8/qwen3-tts:latest
     container_name: qwen3-tts
     restart: unless-stopped
     user: "${PUID}:${PGID}"
@@ -343,50 +343,73 @@ The system now uses **ICL (In-Context Learning) mode** which:
 
 Without ICL, voices often speak too fast compared to the original.
 
-### Full Guide
+### Full Guide (Manual via API)
+
+For advanced control, use the API endpoints directly:
 
 ```bash
-# Download audio from YouTube
-yt-dlp -x --audio-format wav "VIDEO_URL" -o /tmp/voice_name.wav
-
-# Trim to 2-5 minutes (longer = better quality)
-ffmpeg -y -i /tmp/voice_name.wav -t 300 -ar 16000 -ac 1 /tmp/voice_trimmed.wav
-
-# Copy to hel and create voice
-docker cp /tmp/voice_trimmed.wav hel:/tmp/
-ssh hel 'docker exec qwen3-tts curl -s -X POST "http://localhost:3004/v1/voices/add" \
+# Step 1: Create voice from URL (YouTube with timestamp or direct audio URL)
+curl -s -X POST "http://localhost:3004/v1/voices/add-from-url" \
   -H "x-tts-api-key: YOUR_API_KEY" \
-  -F "name=Voice Name" \
-  -F "file=@/tmp/voice_trimmed.wav"'
+  -F "url=https://youtu.be/VIDEO_ID?t=300" \
+  -F "name=voice_name" \
+  -F "duration=300"
 
-# Generate speech
-ssh hel 'docker exec qwen3-tts curl -s -X POST "http://localhost:3004/v1/text-to-speech/Voice_ID" \
+# Step 2: List voices to get the voice_id
+curl -s -H "x-tts-api-key: YOUR_API_KEY" \
+  http://localhost:3004/v1/voices
+
+# Step 3: Generate speech
+curl -s -X POST "http://localhost:3004/v1/text-to-speech/VOICE_ID" \
   -H "x-tts-api-key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d "{\"text\": \"Hello there good boy I have been waiting for you\", \"output_format\": \"mp3_44100_128\"}" \
-  -o /out/output.mp3'
+  -d '{"text": "Hello world, this is a test of the text to speech system.", "output_format": "mp3_44100_128"}' \
+  -o /out/output.mp3
 ```
 
-### Quick YouTube Clone Workflow (60-second samples)
+**YouTube Timestamp Examples:**
+- `?t=1028` - Start at 17 minutes 8 seconds
+- `?t=5m30s` - Start at 5 minutes 30 seconds  
+- `?t=100&dur=300` - Start at 100s, duration 300s
 
-This is the streamlined workflow for creating voice clones from YouTube videos with 60-second samples.
+## Multi-Voice/Podcast Cloning
 
-**Important: We use YouTube subtitles as the primary text source, NOT Whisper transcription.** This is faster and more accurate for YouTube content.
-
-#### Step 1: Download Audio (first 60 seconds)
+Clone multiple speakers from a YouTube video using speaker diarization.
 
 ```bash
-yt-dlp -x --audio-format wav --download-sections "*0-60" -o /tmp/{voice_name}.wav {youtube_url}
+curl -s -X POST "http://localhost:3004/v1/voices/clone-multispeaker" \
+  -H "x-tts-api-key: YOUR_API_KEY" \
+  -F "youtube_url=YOUTUBE_URL" \
+  -F "name_prefix=podcast" \
+  -F "duration=1200"
 ```
 
-Example:
-```bash
-yt-dlp -x --audio-format wav --download-sections "*0-60" -o /tmp/voice_name.wav YOUTUBE_URL
+**Parameters:**
+- `youtube_url`: YouTube video URL
+- `name_prefix`: Prefix for voice names (default: "speaker")
+- `duration`: Seconds to process (default: 1200 = 20 minutes)
+
+**Response:**
+```json
+{
+  "success": true,
+  "num_speakers": 2,
+  "voices": [
+    {
+      "speaker_id": "SPEAKER_00",
+      "voice_id": "abc-123",
+      "voice_name": "podcast_00",
+      "file": "/out/podcast_00_qwen3_v1.mp3"
+    },
+    {
+      "speaker_id": "SPEAKER_01", 
+      "voice_id": "def-456",
+      "voice_name": "podcast_01",
+      "file": "/out/podcast_01_qwen3_v1.mp3"
+    }
+  ]
+}
 ```
-
-#### Step 2: Download Subtitles
-
-**Always prefer subtitles over Whisper transcription** - they're faster and more accurate for YouTube content.
 
 ```bash
 yt-dlp --write-auto-subs --sub-lang en --convert-subs srt -o /tmp/{voice_name} {youtube_url}
@@ -530,7 +553,7 @@ curl -s -X POST "http://localhost:3004/v1/text-to-speech/Voice_ID" \
   -H "x-tts-api-key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "Hello there, good boy. I have been waiting for you.",
+    "text": "Hello world, this is a test of the text to speech system.",
     "output_format": "mp3_44100_128"
   }' -o output.mp3
 
