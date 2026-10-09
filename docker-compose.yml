@@ -3,17 +3,21 @@ services:
     image: ghcr.io/3n8/qwen3-tts:latest
     container_name: qwen3-tts
     restart: unless-stopped
-    user: "${PUID}:${PGID}"
+    user: 1050:1050
     environment:
       - TZ=Europe/Oslo
       - PORT=3004
-      - TTS_API_KEY=sk-your-api-key-here
+      - TTS_API_KEY=sk-you…here
+      - HF_HOME=/.cache/huggingface
+      - HF_CACHE_DIR=/.cache/huggingface
     volumes:
       - /opt/appdata/qwen3-tts/config:/config
       - /opt/appdata/qwen3-tts/models:/models
       - /opt/appdata/qwen3-tts/voices:/voices
       - /opt/appdata/qwen3-tts/out:/out
-      - /opt/appdata/qwen3-tts/hf_cache:/root/.cache/huggingface
+      - /opt/appdata/qwen3-tts/hf_cache:/.cache/huggingface
+    ports:
+      - 3004:3004
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri
